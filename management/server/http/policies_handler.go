@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -35,19 +36,19 @@ func NewPoliciesHandler(accountManager server.AccountManager, authCfg AuthCfg) *
 // GetAllPolicies list for the account
 func (h *Policies) GetAllPolicies(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
 
-	accountPolicies, err := h.accountManager.ListPolicies(r.Context(), account.Id, user.Id)
+	accountPolicies, err := h.accountManager.ListPolicies(r.Context(), account.Id, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
 
-	policies := []*api.Policy{}
+	policies := make([]*api.Policy, 0)
 	for _, policy := range accountPolicies {
 		resp := toPolicyResponse(account, policy)
 		if len(resp.Rules) == 0 {
@@ -62,13 +63,6 @@ func (h *Policies) GetAllPolicies(w http.ResponseWriter, r *http.Request) {
 
 // UpdatePolicy handles update to a policy identified by a given ID
 func (h *Policies) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	vars := mux.Vars(r)
 	policyID := vars["policyId"]
 	if len(policyID) == 0 {
@@ -76,31 +70,34 @@ func (h *Policies) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policyIdx := -1
-	for i, policy := range account.Policies {
-		if policy.ID == policyID {
-			policyIdx = i
-			break
-		}
-	}
-	if policyIdx < 0 {
-		util.WriteError(r.Context(), status.Errorf(status.NotFound, "couldn't find policy id %s", policyID), w)
-		return
-	}
-
-	h.savePolicy(w, r, account, user, policyID)
-}
-
-// CreatePolicy handles policy creation request
-func (h *Policies) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
 
-	h.savePolicy(w, r, account, user, "")
+	policyIdx := slices.IndexFunc(account.Policies, func(policy *server.Policy) bool {
+		return policy.ID == policyID
+	})
+	if policyIdx < 0 {
+		util.WriteError(r.Context(), status.Errorf(status.NotFound, "couldn't find policy id %s", policyID), w)
+		return
+	}
+
+	h.savePolicy(w, r, account, claims.UserId, policyID)
+}
+
+// CreatePolicy handles policy creation request
+func (h *Policies) CreatePolicy(w http.ResponseWriter, r *http.Request) {
+	claims := h.claimsExtractor.FromRequestContext(r)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
+	if err != nil {
+		util.WriteError(r.Context(), err, w)
+		return
+	}
+
+	h.savePolicy(w, r, account, claims.UserId, "")
 }
 
 // savePolicy handles policy creation and update
@@ -108,7 +105,7 @@ func (h *Policies) savePolicy(
 	w http.ResponseWriter,
 	r *http.Request,
 	account *server.Account,
-	user *server.User,
+	userID string,
 	policyID string,
 ) {
 	var req api.PutApiPoliciesPolicyIdJSONRequestBody
@@ -210,7 +207,7 @@ func (h *Policies) savePolicy(
 		policy.SourcePostureChecks = sourcePostureChecksToStrings(account, *req.SourcePostureChecks)
 	}
 
-	if err := h.accountManager.SavePolicy(r.Context(), account.Id, user.Id, &policy); err != nil {
+	if err := h.accountManager.SavePolicy(r.Context(), account.Id, userID, &policy); err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
@@ -226,14 +223,6 @@ func (h *Policies) savePolicy(
 
 // DeletePolicy handles policy deletion request
 func (h *Policies) DeletePolicy(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-	aID := account.Id
-
 	vars := mux.Vars(r)
 	policyID := vars["policyId"]
 	if len(policyID) == 0 {
@@ -241,7 +230,8 @@ func (h *Policies) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = h.accountManager.DeletePolicy(r.Context(), aID, policyID, user.Id); err != nil {
+	claims := h.claimsExtractor.FromRequestContext(r)
+	if err := h.accountManager.DeletePolicy(r.Context(), claims.AccountId, policyID, claims.UserId); err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
@@ -251,38 +241,33 @@ func (h *Policies) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 
 // GetPolicy handles a group Get request identified by ID
 func (h *Policies) GetPolicy(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	policyID := vars["policyId"]
+	if len(policyID) == 0 {
+		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid policy ID"), w)
+		return
+	}
+
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
 
-	switch r.Method {
-	case http.MethodGet:
-		vars := mux.Vars(r)
-		policyID := vars["policyId"]
-		if len(policyID) == 0 {
-			util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid policy ID"), w)
-			return
-		}
-
-		policy, err := h.accountManager.GetPolicy(r.Context(), account.Id, policyID, user.Id)
-		if err != nil {
-			util.WriteError(r.Context(), err, w)
-			return
-		}
-
-		resp := toPolicyResponse(account, policy)
-		if len(resp.Rules) == 0 {
-			util.WriteError(r.Context(), status.Errorf(status.Internal, "no rules in the policy"), w)
-			return
-		}
-
-		util.WriteJSONObject(r.Context(), w, resp)
-	default:
-		util.WriteError(r.Context(), status.Errorf(status.NotFound, "method not found"), w)
+	policy, err := h.accountManager.GetPolicy(r.Context(), account.Id, policyID, claims.UserId)
+	if err != nil {
+		util.WriteError(r.Context(), err, w)
+		return
 	}
+
+	resp := toPolicyResponse(account, policy)
+	if len(resp.Rules) == 0 {
+		util.WriteError(r.Context(), status.Errorf(status.Internal, "no rules in the policy"), w)
+		return
+	}
+
+	util.WriteJSONObject(r.Context(), w, resp)
 }
 
 func toPolicyResponse(account *server.Account, policy *server.Policy) *api.Policy {

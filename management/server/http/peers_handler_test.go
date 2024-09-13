@@ -59,10 +59,10 @@ func initTestMetaData(peers ...*nbpeer.Peer) *PeersHandler {
 			GetDNSDomainFunc: func() string {
 				return "netbird.selfhosted"
 			},
-			GetAccountFromTokenFunc: func(_ context.Context, claims jwtclaims.AuthorizationClaims) (*server.Account, *server.User, error) {
-				user := server.NewAdminUser("test_user")
+			GetAccountByUserOrAccountIdFunc: func(ctx context.Context, userId, accountId, domain string) (*server.Account, error) {
+				user := server.NewAdminUser(userId)
 				return &server.Account{
-					Id:     claims.AccountId,
+					Id:     accountId,
 					Domain: "hotmail.com",
 					Peers: map[string]*nbpeer.Peer{
 						peers[0].ID: peers[0],
@@ -83,7 +83,7 @@ func initTestMetaData(peers ...*nbpeer.Peer) *PeersHandler {
 						},
 						Serial: 51,
 					},
-				}, user, nil
+				}, nil
 			},
 			HasConnectedChannelFunc: func(peerID string) bool {
 				statuses := make(map[string]struct{})

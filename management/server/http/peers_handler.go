@@ -75,7 +75,7 @@ func (h *PeersHandler) getPeer(ctx context.Context, account *server.Account, pee
 	util.WriteJSONObject(ctx, w, toSinglePeerResponse(peerToReturn, groupsInfo, dnsDomain, valid))
 }
 
-func (h *PeersHandler) updatePeer(ctx context.Context, account *server.Account, user *server.User, peerID string, w http.ResponseWriter, r *http.Request) {
+func (h *PeersHandler) updatePeer(ctx context.Context, account *server.Account, userID string, peerID string, w http.ResponseWriter, r *http.Request) {
 	req := &api.PeerRequest{}
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
@@ -97,7 +97,7 @@ func (h *PeersHandler) updatePeer(ctx context.Context, account *server.Account, 
 		}
 	}
 
-	peer, err := h.accountManager.UpdatePeer(ctx, account.Id, user.Id, update)
+	peer, err := h.accountManager.UpdatePeer(ctx, account.Id, userID, update)
 	if err != nil {
 		util.WriteError(ctx, err, w)
 		return
@@ -130,12 +130,6 @@ func (h *PeersHandler) deletePeer(ctx context.Context, accountID, userID string,
 
 // HandlePeer handles all peer requests for GET, PUT and DELETE operations
 func (h *PeersHandler) HandlePeer(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
 	vars := mux.Vars(r)
 	peerID := vars["peerId"]
 	if len(peerID) == 0 {
@@ -143,15 +137,24 @@ func (h *PeersHandler) HandlePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims := h.claimsExtractor.FromRequestContext(r)
+
 	switch r.Method {
 	case http.MethodDelete:
-		h.deletePeer(r.Context(), account.Id, user.Id, peerID, w)
+		h.deletePeer(r.Context(), claims.AccountId, claims.UserId, peerID, w)
 		return
-	case http.MethodPut:
-		h.updatePeer(r.Context(), account, user, peerID, w, r)
-		return
-	case http.MethodGet:
-		h.getPeer(r.Context(), account, peerID, user.Id, w)
+	case http.MethodGet, http.MethodPut:
+		account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
+		if err != nil {
+			util.WriteError(r.Context(), err, w)
+			return
+		}
+
+		if r.Method == http.MethodGet {
+			h.getPeer(r.Context(), account, peerID, claims.UserId, w)
+		} else {
+			h.updatePeer(r.Context(), account, claims.UserId, peerID, w, r)
+		}
 		return
 	default:
 		util.WriteError(r.Context(), status.Errorf(status.NotFound, "unknown METHOD"), w)
@@ -160,19 +163,14 @@ func (h *PeersHandler) HandlePeer(w http.ResponseWriter, r *http.Request) {
 
 // GetAllPeers returns a list of all peers associated with a provided account
 func (h *PeersHandler) GetAllPeers(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		util.WriteError(r.Context(), status.Errorf(status.NotFound, "unknown METHOD"), w)
-		return
-	}
-
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
 
-	peers, err := h.accountManager.GetPeers(r.Context(), account.Id, user.Id)
+	peers, err := h.accountManager.GetPeers(r.Context(), account.Id, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -215,7 +213,7 @@ func (h *PeersHandler) setApprovalRequiredFlag(respBody []*api.PeerBatch, approv
 // GetAccessiblePeers returns a list of all peers that the specified peer can connect to within the network.
 func (h *PeersHandler) GetAccessiblePeers(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, _, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return

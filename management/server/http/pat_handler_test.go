@@ -76,10 +76,6 @@ func initPATTestData() *PATHandler {
 					PersonalAccessToken: server.PersonalAccessToken{},
 				}, nil
 			},
-
-			GetAccountFromTokenFunc: func(_ context.Context, _ jwtclaims.AuthorizationClaims) (*server.Account, *server.User, error) {
-				return testAccount, testAccount.Users[existingUserID], nil
-			},
 			DeletePATFunc: func(_ context.Context, accountID string, initiatorUserID string, targetUserID string, tokenID string) error {
 				if accountID != existingAccountID {
 					return status.Errorf(status.NotFound, "account with ID %s not found", accountID)
@@ -119,7 +115,7 @@ func initPATTestData() *PATHandler {
 				return jwtclaims.AuthorizationClaims{
 					UserId:    existingUserID,
 					Domain:    testDomain,
-					AccountId: testNSGroupAccountID,
+					AccountId: existingAccountID,
 				}
 			}),
 		),

@@ -6,8 +6,6 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	log "github.com/sirupsen/logrus"
-
 	nbdns "github.com/netbirdio/netbird/dns"
 	"github.com/netbirdio/netbird/management/server"
 	"github.com/netbirdio/netbird/management/server/http/api"
@@ -36,14 +34,7 @@ func NewNameserversHandler(accountManager server.AccountManager, authCfg AuthCfg
 // GetAllNameservers returns the list of nameserver groups for the account
 func (h *NameserversHandler) GetAllNameservers(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		log.WithContext(r.Context()).Error(err)
-		http.Redirect(w, r, "/", http.StatusInternalServerError)
-		return
-	}
-
-	nsGroups, err := h.accountManager.ListNameServerGroups(r.Context(), account.Id, user.Id)
+	nsGroups, err := h.accountManager.ListNameServerGroups(r.Context(), claims.AccountId, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -59,15 +50,8 @@ func (h *NameserversHandler) GetAllNameservers(w http.ResponseWriter, r *http.Re
 
 // CreateNameserverGroup handles nameserver group creation request
 func (h *NameserversHandler) CreateNameserverGroup(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	var req api.PostApiDnsNameserversJSONRequestBody
-	err = json.NewDecoder(r.Body).Decode(&req)
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		util.WriteErrorResponse("couldn't parse JSON request", http.StatusBadRequest, w)
 		return
@@ -79,7 +63,10 @@ func (h *NameserversHandler) CreateNameserverGroup(w http.ResponseWriter, r *htt
 		return
 	}
 
-	nsGroup, err := h.accountManager.CreateNameServerGroup(r.Context(), account.Id, req.Name, req.Description, nsList, req.Groups, req.Primary, req.Domains, req.Enabled, user.Id, req.SearchDomainsEnabled)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	nsGroup, err := h.accountManager.CreateNameServerGroup(r.Context(), claims.AccountId, req.Name, req.Description,
+		nsList, req.Groups, req.Primary, req.Domains, req.Enabled, claims.UserId, req.SearchDomainsEnabled,
+	)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -92,13 +79,6 @@ func (h *NameserversHandler) CreateNameserverGroup(w http.ResponseWriter, r *htt
 
 // UpdateNameserverGroup handles update to a nameserver group identified by a given ID
 func (h *NameserversHandler) UpdateNameserverGroup(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	nsGroupID := mux.Vars(r)["nsgroupId"]
 	if len(nsGroupID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid nameserver group ID"), w)
@@ -106,7 +86,7 @@ func (h *NameserversHandler) UpdateNameserverGroup(w http.ResponseWriter, r *htt
 	}
 
 	var req api.PutApiDnsNameserversNsgroupIdJSONRequestBody
-	err = json.NewDecoder(r.Body).Decode(&req)
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		util.WriteErrorResponse("couldn't parse JSON request", http.StatusBadRequest, w)
 		return
@@ -130,7 +110,8 @@ func (h *NameserversHandler) UpdateNameserverGroup(w http.ResponseWriter, r *htt
 		SearchDomainsEnabled: req.SearchDomainsEnabled,
 	}
 
-	err = h.accountManager.SaveNameServerGroup(r.Context(), account.Id, user.Id, updatedNSGroup)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	err = h.accountManager.SaveNameServerGroup(r.Context(), claims.AccountId, claims.UserId, updatedNSGroup)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -143,20 +124,14 @@ func (h *NameserversHandler) UpdateNameserverGroup(w http.ResponseWriter, r *htt
 
 // DeleteNameserverGroup handles nameserver group deletion request
 func (h *NameserversHandler) DeleteNameserverGroup(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	nsGroupID := mux.Vars(r)["nsgroupId"]
 	if len(nsGroupID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid nameserver group ID"), w)
 		return
 	}
 
-	err = h.accountManager.DeleteNameServerGroup(r.Context(), account.Id, nsGroupID, user.Id)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	err := h.accountManager.DeleteNameServerGroup(r.Context(), claims.AccountId, nsGroupID, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -167,21 +142,14 @@ func (h *NameserversHandler) DeleteNameserverGroup(w http.ResponseWriter, r *htt
 
 // GetNameserverGroup handles a nameserver group Get request identified by ID
 func (h *NameserversHandler) GetNameserverGroup(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		log.WithContext(r.Context()).Error(err)
-		http.Redirect(w, r, "/", http.StatusInternalServerError)
-		return
-	}
-
 	nsGroupID := mux.Vars(r)["nsgroupId"]
 	if len(nsGroupID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid nameserver group ID"), w)
 		return
 	}
 
-	nsGroup, err := h.accountManager.GetNameServerGroup(r.Context(), account.Id, user.Id, nsGroupID)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	nsGroup, err := h.accountManager.GetNameServerGroup(r.Context(), claims.AccountId, claims.UserId, nsGroupID)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return

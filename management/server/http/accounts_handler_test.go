@@ -20,11 +20,11 @@ import (
 	"github.com/netbirdio/netbird/management/server/status"
 )
 
-func initAccountsTestData(account *server.Account, admin *server.User) *AccountsHandler {
+func initAccountsTestData(account *server.Account) *AccountsHandler {
 	return &AccountsHandler{
 		accountManager: &mock_server.MockAccountManager{
-			GetAccountFromTokenFunc: func(ctx context.Context, claims jwtclaims.AuthorizationClaims) (*server.Account, *server.User, error) {
-				return account, admin, nil
+			GetAccountByUserOrAccountIdFunc: func(ctx context.Context, userId, accountId, domain string) (*server.Account, error) {
+				return account, nil
 			},
 			UpdateAccountSettingsFunc: func(ctx context.Context, accountID, userID string, newSettings *server.Settings) (*server.Account, error) {
 				halfYearLimit := 180 * 24 * time.Hour
@@ -72,7 +72,7 @@ func TestAccounts_AccountsHandler(t *testing.T) {
 			PeerLoginExpiration:        time.Hour,
 			RegularUsersViewBlocked:    true,
 		},
-	}, adminUser)
+	})
 
 	tt := []struct {
 		name             string

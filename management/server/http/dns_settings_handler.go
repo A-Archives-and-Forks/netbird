@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/netbirdio/netbird/management/server"
 	"github.com/netbirdio/netbird/management/server/http/api"
 	"github.com/netbirdio/netbird/management/server/http/util"
@@ -32,14 +30,7 @@ func NewDNSSettingsHandler(accountManager server.AccountManager, authCfg AuthCfg
 // GetDNSSettings returns the DNS settings for the account
 func (h *DNSSettingsHandler) GetDNSSettings(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		log.WithContext(r.Context()).Error(err)
-		http.Redirect(w, r, "/", http.StatusInternalServerError)
-		return
-	}
-
-	dnsSettings, err := h.accountManager.GetDNSSettings(r.Context(), account.Id, user.Id)
+	dnsSettings, err := h.accountManager.GetDNSSettings(r.Context(), claims.AccountId, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -54,15 +45,8 @@ func (h *DNSSettingsHandler) GetDNSSettings(w http.ResponseWriter, r *http.Reque
 
 // UpdateDNSSettings handles update to DNS settings of an account
 func (h *DNSSettingsHandler) UpdateDNSSettings(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	var req api.PutApiDnsSettingsJSONRequestBody
-	err = json.NewDecoder(r.Body).Decode(&req)
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		util.WriteErrorResponse("couldn't parse JSON request", http.StatusBadRequest, w)
 		return
@@ -72,7 +56,8 @@ func (h *DNSSettingsHandler) UpdateDNSSettings(w http.ResponseWriter, r *http.Re
 		DisabledManagementGroups: req.DisabledManagementGroups,
 	}
 
-	err = h.accountManager.SaveDNSSettings(r.Context(), account.Id, user.Id, updateDNSSettings)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	err = h.accountManager.SaveDNSSettings(r.Context(), claims.AccountId, claims.UserId, updateDNSSettings)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return

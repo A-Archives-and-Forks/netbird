@@ -34,6 +34,16 @@ func initPostureChecksTestData(postureChecks ...*posture.Checks) *PostureChecksH
 
 	return &PostureChecksHandler{
 		accountManager: &mock_server.MockAccountManager{
+			GetAccountByUserOrAccountIdFunc: func(ctx context.Context, userId, accountId, domain string) (*server.Account, error) {
+				user := server.NewAdminUser("test_user")
+				return &server.Account{
+					Id: accountId,
+					Users: map[string]*server.User{
+						"test_user": user,
+					},
+					PostureChecks: postureChecks,
+				}, nil
+			},
 			GetPostureChecksFunc: func(_ context.Context, accountID, postureChecksID, userID string) (*posture.Checks, error) {
 				p, ok := testPostureChecks[postureChecksID]
 				if !ok {
@@ -66,16 +76,6 @@ func initPostureChecksTestData(postureChecks ...*posture.Checks) *PostureChecksH
 					accountPostureChecks = append(accountPostureChecks, p)
 				}
 				return accountPostureChecks, nil
-			},
-			GetAccountFromTokenFunc: func(_ context.Context, claims jwtclaims.AuthorizationClaims) (*server.Account, *server.User, error) {
-				user := server.NewAdminUser("test_user")
-				return &server.Account{
-					Id: claims.AccountId,
-					Users: map[string]*server.User{
-						"test_user": user,
-					},
-					PostureChecks: postureChecks,
-				}, user, nil
 			},
 		},
 		geolocationManager: &geolocation.Geolocation{},

@@ -43,13 +43,7 @@ func NewRoutesHandler(accountManager server.AccountManager, authCfg AuthCfg) *Ro
 // GetAllRoutes returns the list of routes for the account
 func (h *RoutesHandler) GetAllRoutes(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
-	routes, err := h.accountManager.ListRoutes(r.Context(), account.Id, user.Id)
+	routes, err := h.accountManager.ListRoutes(r.Context(), claims.AccountId, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -70,7 +64,7 @@ func (h *RoutesHandler) GetAllRoutes(w http.ResponseWriter, r *http.Request) {
 // CreateRoute handles route creation request
 func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -125,7 +119,10 @@ func (h *RoutesHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	newRoute, err := h.accountManager.CreateRoute(r.Context(), account.Id, newPrefix, networkType, domains, peerId, peerGroupIds, req.Description, route.NetID(req.NetworkId), req.Masquerade, req.Metric, req.Groups, req.Enabled, user.Id, req.KeepRoute)
+	newRoute, err := h.accountManager.CreateRoute(r.Context(), account.Id, newPrefix, networkType, domains, peerId,
+		peerGroupIds, req.Description, route.NetID(req.NetworkId), req.Masquerade, req.Metric, req.Groups, req.Enabled,
+		claims.UserId, req.KeepRoute,
+	)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -167,13 +164,6 @@ func (h *RoutesHandler) validateRoute(req api.PostApiRoutesJSONRequestBody) erro
 
 // UpdateRoute handles update to a route identified by a given ID
 func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	vars := mux.Vars(r)
 	routeID := vars["routeId"]
 	if len(routeID) == 0 {
@@ -181,7 +171,14 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.accountManager.GetRoute(r.Context(), account.Id, route.ID(routeID), user.Id)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
+	if err != nil {
+		util.WriteError(r.Context(), err, w)
+		return
+	}
+
+	_, err = h.accountManager.GetRoute(r.Context(), account.Id, route.ID(routeID), claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -247,7 +244,7 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 		newRoute.PeerGroups = *req.PeerGroups
 	}
 
-	err = h.accountManager.SaveRoute(r.Context(), account.Id, user.Id, newRoute)
+	err = h.accountManager.SaveRoute(r.Context(), account.Id, claims.UserId, newRoute)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -264,20 +261,14 @@ func (h *RoutesHandler) UpdateRoute(w http.ResponseWriter, r *http.Request) {
 
 // DeleteRoute handles route deletion request
 func (h *RoutesHandler) DeleteRoute(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	routeID := mux.Vars(r)["routeId"]
 	if len(routeID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid route ID"), w)
 		return
 	}
 
-	err = h.accountManager.DeleteRoute(r.Context(), account.Id, route.ID(routeID), user.Id)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	err := h.accountManager.DeleteRoute(r.Context(), claims.AccountId, route.ID(routeID), claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -288,20 +279,14 @@ func (h *RoutesHandler) DeleteRoute(w http.ResponseWriter, r *http.Request) {
 
 // GetRoute handles a route Get request identified by ID
 func (h *RoutesHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	routeID := mux.Vars(r)["routeId"]
 	if len(routeID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid route ID"), w)
 		return
 	}
 
-	foundRoute, err := h.accountManager.GetRoute(r.Context(), account.Id, route.ID(routeID), user.Id)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	foundRoute, err := h.accountManager.GetRoute(r.Context(), claims.AccountId, route.ID(routeID), claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), status.Errorf(status.NotFound, "route not found"), w)
 		return

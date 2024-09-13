@@ -90,8 +90,8 @@ func initNameserversTestData() *NameserversHandler {
 				}
 				return status.Errorf(status.NotFound, "nameserver group with ID %s was not found", nsGroupToSave.ID)
 			},
-			GetAccountFromTokenFunc: func(_ context.Context, _ jwtclaims.AuthorizationClaims) (*server.Account, *server.User, error) {
-				return testingNSAccount, testingAccount.Users["test_user"], nil
+			GetAccountByUserOrAccountIdFunc: func(ctx context.Context, userId, accountId, domain string) (*server.Account, error) {
+				return testingNSAccount, nil
 			},
 		},
 		claimsExtractor: jwtclaims.NewClaimsExtractor(

@@ -98,14 +98,20 @@ func (l *GeolocationsHandler) GetCitiesByCountry(w http.ResponseWriter, r *http.
 
 func (l *GeolocationsHandler) authenticateUser(r *http.Request) error {
 	claims := l.claimsExtractor.FromRequestContext(r)
-	_, user, err := l.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := l.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		return err
+	}
+
+	user, ok := account.Users[claims.UserId]
+	if !ok {
+		return status.Errorf(status.InvalidArgument, "invalid user ID")
 	}
 
 	if !user.HasAdminPower() {
 		return status.Errorf(status.PermissionDenied, "user is not allowed to perform this action")
 	}
+
 	return nil
 }
 

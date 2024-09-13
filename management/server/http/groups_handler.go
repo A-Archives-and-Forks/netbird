@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -35,14 +36,14 @@ func NewGroupsHandler(accountManager server.AccountManager, authCfg AuthCfg) *Gr
 // GetAllGroups list for the account
 func (h *GroupsHandler) GetAllGroups(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		log.WithContext(r.Context()).Error(err)
 		http.Redirect(w, r, "/", http.StatusInternalServerError)
 		return
 	}
 
-	groups, err := h.accountManager.GetAllGroups(r.Context(), account.Id, user.Id)
+	groups, err := h.accountManager.GetAllGroups(r.Context(), account.Id, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -58,13 +59,6 @@ func (h *GroupsHandler) GetAllGroups(w http.ResponseWriter, r *http.Request) {
 
 // UpdateGroup handles update to a group identified by a given ID
 func (h *GroupsHandler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	vars := mux.Vars(r)
 	groupID, ok := vars["groupId"]
 	if !ok {
@@ -73,6 +67,13 @@ func (h *GroupsHandler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(groupID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "group ID can't be empty"), w)
+		return
+	}
+
+	claims := h.claimsExtractor.FromRequestContext(r)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
+	if err != nil {
+		util.WriteError(r.Context(), err, w)
 		return
 	}
 
@@ -118,7 +119,7 @@ func (h *GroupsHandler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		IntegrationReference: eg.IntegrationReference,
 	}
 
-	if err := h.accountManager.SaveGroup(r.Context(), account.Id, user.Id, &group); err != nil {
+	if err := h.accountManager.SaveGroup(r.Context(), account.Id, claims.UserId, &group); err != nil {
 		log.WithContext(r.Context()).Errorf("failed updating group %s under account %s %v", groupID, account.Id, err)
 		util.WriteError(r.Context(), err, w)
 		return
@@ -130,7 +131,7 @@ func (h *GroupsHandler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 // CreateGroup handles group creation request
 func (h *GroupsHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -160,7 +161,7 @@ func (h *GroupsHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 		Issued: nbgroup.GroupIssuedAPI,
 	}
 
-	err = h.accountManager.SaveGroup(r.Context(), account.Id, user.Id, &group)
+	err = h.accountManager.SaveGroup(r.Context(), account.Id, claims.UserId, &group)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -171,19 +172,19 @@ func (h *GroupsHandler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 // DeleteGroup handles group deletion request
 func (h *GroupsHandler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-	aID := account.Id
-
 	groupID := mux.Vars(r)["groupId"]
 	if len(groupID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid group ID"), w)
 		return
 	}
+
+	claims := h.claimsExtractor.FromRequestContext(r)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
+	if err != nil {
+		util.WriteError(r.Context(), err, w)
+		return
+	}
+	aID := account.Id
 
 	allGroup, err := account.GetGroupAll()
 	if err != nil {
@@ -196,10 +197,10 @@ func (h *GroupsHandler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.accountManager.DeleteGroup(r.Context(), aID, user.Id, groupID)
+	err = h.accountManager.DeleteGroup(r.Context(), aID, claims.UserId, groupID)
 	if err != nil {
-		_, ok := err.(*server.GroupLinkError)
-		if ok {
+		var groupLinkError *server.GroupLinkError
+		if errors.As(err, &groupLinkError) {
 			util.WriteErrorResponse(err.Error(), http.StatusBadRequest, w)
 			return
 		}
@@ -212,32 +213,26 @@ func (h *GroupsHandler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 // GetGroup returns a group
 func (h *GroupsHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := mux.Vars(r)["groupId"]
+	if len(groupID) == 0 {
+		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid group ID"), w)
+		return
+	}
+
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
 
-	switch r.Method {
-	case http.MethodGet:
-		groupID := mux.Vars(r)["groupId"]
-		if len(groupID) == 0 {
-			util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid group ID"), w)
-			return
-		}
-
-		group, err := h.accountManager.GetGroup(r.Context(), account.Id, groupID, user.Id)
-		if err != nil {
-			util.WriteError(r.Context(), err, w)
-			return
-		}
-
-		util.WriteJSONObject(r.Context(), w, toGroupResponse(account, group))
-	default:
-		util.WriteError(r.Context(), status.Errorf(status.NotFound, "HTTP method not found"), w)
+	group, err := h.accountManager.GetGroup(r.Context(), account.Id, groupID, claims.UserId)
+	if err != nil {
+		util.WriteError(r.Context(), err, w)
 		return
 	}
+
+	util.WriteJSONObject(r.Context(), w, toGroupResponse(account, group))
 }
 
 func toGroupResponse(account *server.Account, group *nbgroup.Group) *api.Group {

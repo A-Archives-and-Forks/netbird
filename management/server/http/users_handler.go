@@ -35,28 +35,23 @@ func NewUsersHandler(accountManager server.AccountManager, authCfg AuthCfg) *Use
 
 // UpdateUser is a PUT requests to update User data
 func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		util.WriteErrorResponse("wrong HTTP method", http.StatusMethodNotAllowed, w)
-		return
-	}
-
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
+	account, err := h.accountManager.GetAccountByUserOrAccountID(r.Context(), "", claims.AccountId, "")
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
 	}
 
 	vars := mux.Vars(r)
-	userID := vars["userId"]
-	if len(userID) == 0 {
+	targetUserID := vars["userId"]
+	if len(targetUserID) == 0 {
 		util.WriteError(r.Context(), status.Errorf(status.InvalidArgument, "invalid user ID"), w)
 		return
 	}
 
-	existingUser, ok := account.Users[userID]
+	existingUser, ok := account.Users[targetUserID]
 	if !ok {
-		util.WriteError(r.Context(), status.Errorf(status.NotFound, "couldn't find user with ID %s", userID), w)
+		util.WriteError(r.Context(), status.Errorf(status.NotFound, "couldn't find user with ID %s", targetUserID), w)
 		return
 	}
 
@@ -78,8 +73,8 @@ func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newUser, err := h.accountManager.SaveUser(r.Context(), account.Id, user.Id, &server.User{
-		Id:                   userID,
+	newUser, err := h.accountManager.SaveUser(r.Context(), account.Id, claims.UserId, &server.User{
+		Id:                   targetUserID,
 		Role:                 userRole,
 		AutoGroups:           req.AutoGroups,
 		Blocked:              req.IsBlocked,
@@ -96,18 +91,6 @@ func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 // DeleteUser is a DELETE request to delete a user
 func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		util.WriteErrorResponse("wrong HTTP method", http.StatusMethodNotAllowed, w)
-		return
-	}
-
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	vars := mux.Vars(r)
 	targetUserID := vars["userId"]
 	if len(targetUserID) == 0 {
@@ -115,7 +98,8 @@ func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.accountManager.DeleteUser(r.Context(), account.Id, user.Id, targetUserID)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	err := h.accountManager.DeleteUser(r.Context(), claims.AccountId, claims.UserId, targetUserID)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -126,20 +110,8 @@ func (h *UsersHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 // CreateUser creates a User in the system with a status "invited" (effectively this is a user invite).
 func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		util.WriteErrorResponse("wrong HTTP method", http.StatusMethodNotAllowed, w)
-		return
-	}
-
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	req := &api.PostApiUsersJSONRequestBody{}
-	err = json.NewDecoder(r.Body).Decode(&req)
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		util.WriteErrorResponse("couldn't parse JSON request", http.StatusBadRequest, w)
 		return
@@ -160,7 +132,8 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		name = *req.Name
 	}
 
-	newUser, err := h.accountManager.CreateUser(r.Context(), account.Id, user.Id, &server.UserInfo{
+	claims := h.claimsExtractor.FromRequestContext(r)
+	newUser, err := h.accountManager.CreateUser(r.Context(), claims.AccountId, claims.UserId, &server.UserInfo{
 		Email:         email,
 		Name:          name,
 		Role:          req.Role,
@@ -178,19 +151,8 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 // GetAllUsers returns a list of users of the account this user belongs to.
 // It also gathers additional user data (like email and name) from the IDP manager.
 func (h *UsersHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		util.WriteErrorResponse("wrong HTTP method", http.StatusMethodNotAllowed, w)
-		return
-	}
-
 	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
-	data, err := h.accountManager.GetUsersFromAccount(r.Context(), account.Id, user.Id)
+	data, err := h.accountManager.GetUsersFromAccount(r.Context(), claims.AccountId, claims.UserId)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
@@ -225,18 +187,6 @@ func (h *UsersHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
 // InviteUser resend invitations to users who haven't activated their accounts,
 // prior to the expiration period.
 func (h *UsersHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		util.WriteErrorResponse("wrong HTTP method", http.StatusMethodNotAllowed, w)
-		return
-	}
-
-	claims := h.claimsExtractor.FromRequestContext(r)
-	account, user, err := h.accountManager.GetAccountFromToken(r.Context(), claims)
-	if err != nil {
-		util.WriteError(r.Context(), err, w)
-		return
-	}
-
 	vars := mux.Vars(r)
 	targetUserID := vars["userId"]
 	if len(targetUserID) == 0 {
@@ -244,7 +194,8 @@ func (h *UsersHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.accountManager.InviteUser(r.Context(), account.Id, user.Id, targetUserID)
+	claims := h.claimsExtractor.FromRequestContext(r)
+	err := h.accountManager.InviteUser(r.Context(), claims.AccountId, claims.UserId, targetUserID)
 	if err != nil {
 		util.WriteError(r.Context(), err, w)
 		return
