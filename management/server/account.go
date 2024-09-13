@@ -2033,18 +2033,18 @@ func (am *DefaultAccountManager) GetDNSDomain() string {
 // CheckUserAccessByJWTGroups checks if the user has access, particularly in cases where the admin enabled JWT
 // group propagation and set the list of groups with access permissions.
 func (am *DefaultAccountManager) CheckUserAccessByJWTGroups(ctx context.Context, claims jwtclaims.AuthorizationClaims) error {
-	account, _, err := am.GetAccountFromToken(ctx, claims)
+	settings, err := am.Store.GetAccountSettings(ctx, claims.AccountId)
 	if err != nil {
 		return err
 	}
 
 	// Ensures JWT group synchronization to the management is enabled before,
 	// filtering access based on the allowed groups.
-	if account.Settings != nil && account.Settings.JWTGroupsEnabled {
-		if allowedGroups := account.Settings.JWTAllowGroups; len(allowedGroups) > 0 {
+	if settings != nil && settings.JWTGroupsEnabled {
+		if allowedGroups := settings.JWTAllowGroups; len(allowedGroups) > 0 {
 			userJWTGroups := make([]string, 0)
 
-			if claim, ok := claims.Raw[account.Settings.JWTGroupsClaimName]; ok {
+			if claim, ok := claims.Raw[settings.JWTGroupsClaimName]; ok {
 				if claimGroups, ok := claim.([]interface{}); ok {
 					for _, g := range claimGroups {
 						if group, ok := g.(string); ok {
